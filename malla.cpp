@@ -8,9 +8,10 @@
 using namespace std;
 
 //------CONSTANTS------------------------------------------------------------
-const int Nx=10,Ny=10,Nz=1,N=Nx*Ny;
-const double L=10,K=2,K1=1e7,Kcundall=10;
+const int Nx=10,Ny=1,Nz=1,N=Nx*Ny;
+const double L=10,K=10,K1=1e7,Kcundall=10;
 const double Gamma=50,Mu=0.4;
+const double gamma1=0.25;
 const double g=1,G=1;
 
 const double Zeta=0.1786178958448091;
@@ -62,7 +63,8 @@ public:
   void iniciate(void);
   void allforces(mass *Masses,double dt);
   void interactionforce(mass & Mass1,mass & Mass2,vector3D & inerp,bool & interacting,double dt);
-  void springforcebetween(mass & Mass1,mass & Mass2); 
+  void springforcebetween(mass & Mass1,mass & Mass2);
+  void periodicconditions(mass & Mass1,mass & Mass2);
 };
 
 //--------MAIN-----------------------------------------------------------------
@@ -76,46 +78,41 @@ int main (void)
   vector3D v0,r0 ,w0,l;
   
   double m0=1,R0=1.;
-  double t,tdraw, dt=1, tmax=500;
+  double t,tdraw, dt=1e-1, tmax=200;
   
   r0.cargue(0,0,0);
   v0.cargue(0,0,0);
   w0.cargue(0,0,0);
 
   initanimation2D();Ndraw=15000;
-  for(k=0;k<Nz;k++){
-      for(i=0;i<Ny;i++){
-	for(j=0;j<Nx;j++){
-	  l.cargue(j*L,i*L,k*L);
-	  Springmass[i*Nx+j+Nx*Ny*k].init(m0,0,r0+l,v0,w0,R0);
-	} 
-      }
-  }
+   
   //r0.cargue(Nx*L/2,L*Ny+10*R0,0);
   
-  
-  r0.cargue(0,L/2,0);
+  for(i=0;i<Ny;i++){
+    for(j=0;j<Nx;j++){
+      //if(j==0) l.cargue((j)*L,j*L/2,0);
+       l.cargue(j*L,i*L,0);
+       Springmass[i*Nx+j].init(m0,0,r0+l,v0,w0,R0);
+    }
+  }
+  r0.cargue(L/2,0,0);
   Springmass[0].init(m0,0,r0,v0,w0,R0);
+  //r0.cargue((Nx-1)*L,3*L/2,0);
+  //Springmass[Nx+Nx-1].init(m0,0,r0,v0,w0,R0);
   for(t=tdraw=0; t < tmax; t+=dt,tdraw+=dt){
-    
+     
     if(tdraw > tmax/Ndraw){
       startdrawing2D();
       for(i=0;i<N;i++)Springmass[i].drawmass2D();
       enddrawing();
       tdraw=0;
       }
-   
-    //    for(i=0;i<N;i++)cout<<Springmass[i].Getx()<<" "<<Springmass[i].Gety()<<" "<<Springmass[i].Getz()<<"\t";cout<<endl;
+    //cout<<t<<"\t ";for(i=0;i<N;i++)cout<<Springmass[i].Getx()<<" "<<Springmass[i].Gety()<</*" "<<Springmass[i].Getz()<<*/"\t";cout<<endl;
  
      
-    movedt(Springmass,Hooke,dt);
+        movedt(Springmass,Hooke,dt);
     
-    /*for(i=0;i<Ny;i++){
-	for(j=0;j<Nx;j+=Nx-1){
-	  l.cargue(j*L,i*L,0);
-	  Springmass[i*Nx+j].init(m0,0,r0+l,v0,w0,R0);
-	} 
-      }*/
+   
       
     }
   
@@ -186,31 +183,63 @@ void collider::iniciate(void)
 void collider::allforces(mass *Masses,double dt)
 {
   int i,j,k,q;
-  vector3D x0,y0,x,y,L0,F,gvec;
-  gvec.cargue(0,-g,0);
+  vector3D x0,y0,x,y,L0,L1,F,ru,ru1;
+ 
   for(i=0;i<N;i++)Masses[i].eraseforce();
-  
-  //for(i=0;i<N;i++)Masses[i].addforce(gvec*Masses[i].m);
- 	
-  for(k=0;k<Nz;k++){
-    for(j=0;j<Ny;j++){
-      for(i=0;i<Nx;i++){
-	q=i+Ny*j+Nx*Ny*k;
-	if(i!=Nx-1)springforcebetween(Masses[q],Masses[q+1]);
-	if(j!=Ny-1)springforcebetween(Masses[q],Masses[q+Nx]);
-	if(k!=Nz-1)springforcebetween(Masses[q],Masses[q+Nx*Ny]);
-	
-      }
-    }
-    }
 
-  for(i=0;i<N;i++)interactionforce(Masses[i],Masses[N],interp[i],interacting[i],dt);
+  /*/Wall boundry conditions
+  for(i=0;i<Ny;i++){
+    L0.cargue(-L,i*L,0); L1.cargue((Nx)*L,i*L,0);
+    x=Masses[i*Nx].r-L0; y= Masses[(i+1)*Nx-1].r-L1;
+    ru=x/norma(x);       ru1=y/norma(y);
+    x0=L*ru;             y0=L*ru1;
+    F=-K*(x-x0);         Masses[i*Nx].addforce(F);
+    F=-K*(y-y0);         Masses[(i+1)*Nx-1].addforce(F);
+    }*/
+
+  // horizontal springs
+  for(i=0;i<Ny;i++){
+    for(j=0;j<Nx-1;j++){
+      springforcebetween(Masses[i*Nx+j],Masses[i*Nx+j+1]);
+    }
+  }
+  
+  //Vertical springs
+  for(i=0;i<Ny;i++){
+    for(j=0;j<Nx;j++){
+      if(i<Ny-1) springforcebetween(Masses[i*Nx+j],Masses[(i+1)*Nx+j]);
+    }
+  }
+  
+  // Damping
+  for(i=0;i<Ny;i++){
+    for(j=0;j<Nx;j++){
+      Masses[i*Nx+j].addforce(-Masses[i*Nx+j].m*gamma1*Masses[i*Nx+j].v);
+    }
+  }
+
+  //Periodic boundry conditions
+    for(i=0;i<Ny;i++)periodicconditions(Masses[(i+1)*Nx-1],Masses[i*Nx]);
+  
+  //for(i=0;i<N;i++)interactionforce(Masses[i],Masses[N],interp[i],interacting[i],dt);
 }
 
 void collider::springforcebetween(mass & Mass1,mass &Mass2)
 {
-   vector3D x0,x,F,F1, ru,gvec;  
+  vector3D x0,x,F,F1, ru,gvec;  
   x=Mass2.r-Mass1.r;
+  ru=x/norma(x);
+  x0=L*ru;
+  F=-K*(x-x0);
+  Mass2.addforce(F);
+  Mass1.addforce((-1)*F);
+}
+
+void collider::periodicconditions(mass & Mass1,mass & Mass2)
+{
+  vector3D x0,x,F,F1, ru,gvec,nxvec;
+  nxvec.cargue((Nx+1)*L,0,0);
+  x=Mass2.r-Mass1.r+nxvec;
   ru=x/norma(x);
   x0=L*ru;
   F=-K*(x-x0);
@@ -220,7 +249,7 @@ void collider::springforcebetween(mass & Mass1,mass &Mass2)
 
 void collider::interactionforce(mass & Mass1,mass & Mass2,vector3D &interp,bool & interacting, double dt)
 {
-  vector3D F,Ft,Fn,r21,n,vc,vcn,vct,t;
+  /* vector3D F,Ft,Fn,r21,n,vc,vcn,vct,t;
   double d,s,m1,m2,m21,R1,R2,normvct,compFn,compvcn,normFt,Ftmax;
   double ERRf=1e-8;
   
@@ -262,7 +291,7 @@ void collider::interactionforce(mass & Mass1,mass & Mass2,vector3D &interp,bool 
   }
   else if(interacting==true){
     interp.cargue(0,0,0); interacting=false;
-  }
+    }*/
 }
 
 //----------General Functions---------------------------
@@ -294,8 +323,8 @@ void movedt(mass *Masses,collider Hooke, double dt)
 
 void initanimation2D(void)
 {
-  //cout << "set term gif animate" << endl;
-  //cout << "set output 'gify.gif'" << endl; 
+  cout << "set term gif animate" << endl;
+  cout << "set output 'gify.gif'" << endl; 
   cout << "unset key" << endl;
   cout << "set xrange [" << -L << ":"<<(Nx)*L << "]" << endl;
   cout << "set yrange [" << -L << ":"<<(Ny)*L << "]" << endl;
@@ -307,8 +336,8 @@ void initanimation2D(void)
 
 void initanimation3D(void)
 {
-  //cout << "set term gif animate" << endl;
-  //cout << "set output 'gify.gif'" << endl; 
+  cout << "set term gif animate" << endl;
+  cout << "set output 'gify.gif'" << endl; 
   cout << "unset key" << endl;
   cout << "set xrange [" << -L << ":"<<(Nx+1)*L << "]" << endl;
   cout << "set yrange [" << -L << ":"<<(Ny+1)*L << "]" << endl;
