@@ -8,9 +8,10 @@
 using namespace std;
 
 //------CONSTANTS------------------------------------------------------------
-const int Nx=20,Ny=4,Nz=1,N=Nx*Ny;
-const double L=3,K=20,K1=1,Kcundall=10;
-const double Gamma=20,MU=0.4;
+const int Nx=100,Ny=3,Nz=1,N=Nx*Ny;
+const double L=3,K=20,K1=1e3,Kcundall=10;
+const double Gamma=30,MU=0.4;
+const double Gamma1=1.5;
 const double gamma1=0.25;
 const double g=1;
 
@@ -36,7 +37,7 @@ void enddrawing(void);
 
 class mass{
 private:
-  double m, R,theta,I;
+  double m, R,theta,I, theta_r;
   vector3D F,r,v, w,tau;
 public:
   void init(double m0,double theta0,vector3D r0,vector3D v0,vector3D w0,double R0);
@@ -48,6 +49,8 @@ public:
   double Getx(void){return r.x();};
   double Gety(void){return r.y();};
   double Getz(void){return r.z();};
+  double Getvx(void){return v.x();};
+  double Gettheta_r(void){return theta_r;};
   void drawmass2D(void);
   void drawmass3D(void);
   friend class mesh;
@@ -77,18 +80,17 @@ int main (void)
   int i,j,k, Ndraw;
   vector3D v0,r0 ,w0,l;
   
-  double m0=1,R0=0.5;
-  double t,tdraw, dt=1e-1, tmax=200;
+  double m0=2,R0=0.5;
+  double t,tdraw, dt=1e-1, tmax=75;
 
-  double mmass=2, Rmass=10*R0;
+  double mmass=m0/2., Rmass=20*R0, h=(Ny-1)*L+Rmass+R0;
+
+  initanimation2D(h);Ndraw=15000;
   
   r0.cargue(0,0,0);
   v0.cargue(0,0,0);
   w0.cargue(0,0,0);
-
-  initanimation2D(Ny*L+Rmass);Ndraw=15000;
-   
-  
+ 
   //iniciates mesh
   Hooke.iniciate();
   for(i=0;i<Ny;i++){
@@ -97,12 +99,15 @@ int main (void)
        Springmass[i*Nx+j].init(m0,0,r0+l,v0,w0,R0);
     }
   }
+  
   //iniciates mass
-  r0.cargue((Nx-1)*L/2.,Ny*L+Rmass,0);
+  
+  r0.cargue((Nx-1)*L,h,0);
+  w0.cargue(0,0,2);
   Springmass[N].init(mmass,0,r0,v0,w0,Rmass);
 
   for(t=tdraw=0; t < tmax; t+=dt,tdraw+=dt){
-     
+    
     if(tdraw > tmax/Ndraw){
       startdrawing2D();
       for(i=0;i<N+1;i++)Springmass[i].drawmass2D();
@@ -110,9 +115,9 @@ int main (void)
       tdraw=0;
       }
     //cout<<t<<"\t ";for(i=0;i<N;i++)cout<<Springmass[i].Getx()<<" "<<Springmass[i].Gety()<</*" "<<Springmass[i].Getz()<<*/"\t";cout<<endl;
- 
+    //cout<<Springmass[N].Getvx()<<" "<<Springmass[N].Gettheta_r()<<endl;
      
-        movedt(Springmass,Hooke,dt);
+    movedt(Springmass,Hooke,dt);
     
    
       
@@ -130,6 +135,7 @@ void mass::init(double m0,double theta0,vector3D r0,vector3D v0,vector3D w0,doub
 {
   m=m0; v=v0;r=r0; R=R0;theta=theta0;w=w0;
   F.cargue(0,0,0); tau.cargue(0,0,0); I=2*m*R*R/5;
+  theta_r=0;
 }
 
 void mass::eraseforce(void)
@@ -204,14 +210,14 @@ void collider::allforces(mass *Masses,double dt)
     F=-K*(y-y0);         Masses[(i+1)*Nx-1].addforce(F);
     }
 
-  // horizontal springs
+  // horizontal springs in x
   for(i=0;i<Ny;i++){
     for(j=0;j<Nx-1;j++){
       springforcebetween(Masses[i*Nx+j],Masses[i*Nx+j+1]);
     }
   }
   
-  //Vertical springs
+  //horizontal springs in y
   for(i=0;i<Ny;i++){
     for(j=0;j<Nx;j++){
       if(i<Ny-1) springforcebetween(Masses[i*Nx+j],Masses[(i+1)*Nx+j]);
@@ -224,12 +230,14 @@ void collider::allforces(mass *Masses,double dt)
       Masses[i*Nx+j].addforce(-Masses[i*Nx+j].m*gamma1*Masses[i*Nx+j].v);
     }
   }
-
+ 
+  
   //Periodic boundry conditions
   //for(i=0;i<Ny;i++)periodicconditions(Masses[(i+1)*Nx-1],Masses[i*Nx]);
   
   //interaction force between mass and mesh
-  for(i=0;i<N;i++){for(j=i+1;j<N+1;j++)interactionforce(Masses[i],Masses[j],interp[i][j],interacting[i][j],dt);}
+  for(i=0;i<N;i++){interactionforce(Masses[i],Masses[N],interp[i][N],interacting[i][N],dt);}
+
 }
 
 void collider::springforcebetween(mass & Mass1,mass &Mass2)
@@ -258,11 +266,10 @@ void collider::periodicconditions(mass & Mass1,mass & Mass2)
 void collider::interactionforce(mass & Mass1,mass & Mass2,vector3D &interp,bool & interacting, double dt)
 {
   int i,j;
-  vector3D r21,n,vc,vcn,vct,Fn,Ft,F,t;
+  vector3D r21,n,vc,vcn,vct,Fn,Ft,F,t,F1,F2,tau,Id;
   double R1,R2,d,s,m1,m2,m21,compvcn,compFn,normvct,Ftmax,normFt;
   double ERFF=1e-8;
-  
-  
+  //Id.cargue(0,-g,0);
   R1=Mass1.R; R2=Mass2.R;
   
   r21=Mass2.r-Mass1.r; d=norma(r21); n=r21/d;
@@ -291,12 +298,20 @@ void collider::interactionforce(mass & Mass1,mass & Mass2,vector3D &interp,bool 
     Ft=interp*(-Kcundall);
     Ftmax=MU*compFn; normFt=norma(Ft);
     if(normFt>Ftmax) Ft=interp*(-Ftmax/norma(interp));
-
+    
+    
+    
     F=Fn+Ft;
-    Mass2.addforce(F); Mass2.addtorque((n*(-R2))^Ft);
-    Mass1.addforce(F*(-1)); Mass1.addtorque((n*R1)^(Ft*(-1)));
+    F2=F-(Mass2.w^n)*(R2*Gamma1*m2);
+    F1=(-1)*F-(Mass1.w^n)*(R1*Gamma1*m1);
+    
+    //Mass2.theta_r=(sqrt((F*F)*R2*R2*(R2*R2*(F2*F2)-tau.z()*tau.z())));
+    Mass2.addforce(F); Mass2.addtorque((n*(-R2))^(F-Fn));
+    Mass1.addforce((-1)*F); Mass1.addtorque((n*R1)^(F1+Fn));
+
+    interacting=true;
   }
-  
+  else if(interacting==true){interp.cargue(0,0,0);interacting==false;}
 }
 
 //----------General Functions---------------------------
@@ -333,7 +348,7 @@ void initanimation2D(double h)
   cout << "set output 'gify.gif'" << endl; 
   cout << "unset key" << endl;
   cout << "set xrange [" << -L << ":"<<(Nx)*L << "]" << endl;
-  cout << "set yrange [" << -L << ":"<<(Ny)*L+h << "]" << endl;
+  cout << "set yrange [" << -L-h << ":"<<(Ny)*L+3*h/2 << "]" << endl;
   cout << "set size ratio -1" << endl;
   cout << "set parametric" << endl;
   cout << "set trange[0:7]" << endl;
@@ -346,7 +361,7 @@ void initanimation3D(void)
   cout << "set output 'gify.gif'" << endl; 
   cout << "unset key" << endl;
   cout << "set xrange [" << -L << ":"<<(Nx+1)*L << "]" << endl;
-  cout << "set yrange [" << -L << ":"<<(Ny+1)*L << "]" << endl;
+  cout << "set yrange [" << -3*L << ":"<<(Ny+1)*L << "]" << endl;
   cout << "set zrange [" << -L << ":"<<(Nz+1)*L << "]" << endl;
   cout << "set size ratio -1" << endl;
   cout << "set parametric" << endl;
